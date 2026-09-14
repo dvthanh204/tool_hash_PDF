@@ -19,7 +19,7 @@ struct ReaderLockApp: App {
                     .onAppear {
                         // Kiểm tra License xem đã có trong UserDefaults chưa
                         if let key = UserDefaults.standard.string(forKey: "LicenseKey"),
-                           CryptoManager.verifyLicense(key: key) {
+                           CryptoManager.verifyLicense(key: key, machineID: MachineID.get()).isValid {
                             self.isActivated = true
                         }
                     }
