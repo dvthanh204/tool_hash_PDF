@@ -1,4 +1,5 @@
 import SwiftUI
+import PDFKit
 
 struct MainView: View {
     @State private var pdfs: [ArchivedPDF] = []
@@ -26,8 +27,23 @@ struct MainView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 if let pdf = selectedPDF {
-                    ProtectedPDFViewer(pdfData: pdf.data)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    VStack(spacing: 0) {
+                        HStack {
+                            Spacer()
+                            Button(action: {
+                                printSelectedPDF(data: pdf.data)
+                            }) {
+                                Label("Máy in", systemImage: "printer")
+                            }
+                            .padding(.trailing, 20)
+                            .padding(.top, 10)
+                            .padding(.bottom, 5)
+                        }
+                        .background(Color(NSColor.windowBackgroundColor))
+                        
+                        ProtectedPDFViewer(pdfData: pdf.data)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 } else {
                     Text("Vui lòng chọn bài giảng bên trái").frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -60,5 +76,16 @@ struct MainView: View {
                 self.selectedPDF = self.pdfs.first
             }
         } catch { }
+    }
+    
+    func printSelectedPDF(data: Data) {
+        if let pdfDoc = PDFDocument(data: data) {
+            let printInfo = NSPrintInfo.shared
+            if let printOp = pdfDoc.printOperation(for: printInfo, scalingMode: .pageScaleToFit, autoRotate: true) {
+                printOp.showsPrintPanel = true
+                printOp.showsProgressPanel = true
+                printOp.run()
+            }
+        }
     }
 }

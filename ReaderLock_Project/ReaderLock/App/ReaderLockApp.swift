@@ -25,9 +25,8 @@ struct ReaderLockApp: App {
                     }
             }
         }
-        // Vô hiệu hóa một số tính năng trong Menu hệ thống
+        // Vô hiệu hóa tính năng lưu file
         .commands {
-            CommandGroup(replacing: .printItem) { }     // No Print
             CommandGroup(replacing: .saveItem) { }      // No Export / Save
         }
     }

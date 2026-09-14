@@ -165,15 +165,15 @@ class AuthorApp(ctk.CTk):
             shutil.copy("tailieu.khoa", os.path.join(res_dir, "tailieu.khoa"))
             os.remove("tailieu.khoa")
             
-            # 4. Tạo file ZIP (XIP) trên thư mục dist để xuất hàng
+            # 4. Tạo file ZIP trên thư mục dist để xuất hàng
             os.makedirs("dist", exist_ok=True)
-            base_zip_name = 'macOS_KhoaHoc_MultiFiles.xip' if len(input_files) > 1 else f"macOS_KhoaHoc_{os.path.splitext(os.path.basename(input_files[0]))[0]}.xip"
+            base_zip_name = 'macOS_KhoaHoc_MultiFiles.zip' if len(input_files) > 1 else f"macOS_KhoaHoc_{os.path.splitext(os.path.basename(input_files[0]))[0]}.zip"
             out_zip = os.path.join("dist", base_zip_name)
             
             counter = 2
             while os.path.exists(out_zip):
                 suffix = "MultiFiles" if len(input_files) > 1 else os.path.splitext(os.path.basename(input_files[0]))[0]
-                out_zip = os.path.join("dist", f"macOS_KhoaHoc_{suffix}{counter}.xip")
+                out_zip = os.path.join("dist", f"macOS_KhoaHoc_{suffix}{counter}.zip")
                 counter += 1
 
             with zipfile.ZipFile(out_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -190,7 +190,7 @@ class AuthorApp(ctk.CTk):
                             zf.writestr(zinfo, f.read())
                             
             self.status_lbl.configure(text="Mã hóa THÀNH CÔNG!")
-            messagebox.showinfo("Thành Công", f"Đã đóng gói xong xuôi qua:\n{out_zip}\n\n(Mang file .xip này gửi cho khách macOS)")
+            messagebox.showinfo("Thành Công", f"Đã đóng gói xong xuôi qua:\n{out_zip}\n\n(Mang file .zip này gửi cho khách macOS)")
 
         except Exception as e:
             messagebox.showerror("Lỗi Build", f"Có lỗi xảy ra: {e}")
