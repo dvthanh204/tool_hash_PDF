@@ -12,7 +12,7 @@ struct ArchiveManager {
         var pdfs: [ArchivedPDF] = []
         var revocations: [String] = []
         
-        guard let archive = Archive(data: zipData, accessMode: .read) else {
+        guard let archive = try? Archive(data: zipData, accessMode: .read) else {
             return (pdfs, revocations)
         }
         

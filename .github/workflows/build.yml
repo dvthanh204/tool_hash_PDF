@@ -30,14 +30,14 @@ jobs:
           swiftc -target x86_64-apple-macosx12.0 -parse-as-library \
                  $(find ReaderLock_Project/ReaderLock -name "*.swift") \
                  -o MyApp_x86_64 \
-                 -framework SwiftUI -framework AppKit -framework Foundation -framework PDFKit -framework UniformTypeIdentifiers -framework Compression
+                 -framework SwiftUI -framework AppKit -framework Foundation -framework PDFKit -framework UniformTypeIdentifiers
 
       - name: Compile Swift App (Apple Silicon ARM64)
         run: |
           swiftc -target arm64-apple-macosx12.0 -parse-as-library \
                  $(find ReaderLock_Project/ReaderLock -name "*.swift") \
                  -o MyApp_arm64 \
-                 -framework SwiftUI -framework AppKit -framework Foundation -framework PDFKit -framework UniformTypeIdentifiers -framework Compression
+                 -framework SwiftUI -framework AppKit -framework Foundation -framework PDFKit -framework UniformTypeIdentifiers
 
       - name: Lipo Create Universal Binary
         run: |
