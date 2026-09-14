@@ -1,5 +1,5 @@
 import Foundation
-import ZIPFoundation // Yêu cầu tích hợp thư viện này qua Swift Package Manager (SPM)
+
 
 struct ArchivedPDF {
     let name: String
