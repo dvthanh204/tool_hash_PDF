@@ -1,0 +1,79 @@
+name: Build macOS App Native Swift
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_macos_app:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup App Directory Structure
+        run: |
+          mkdir -p MyApp.app/Contents/MacOS
+          mkdir -p MyApp.app/Contents/Resources
+
+      - name: Download ZIPFoundation
+        run: |
+          # Library xử lý Zip in-memory nhanh nhất cho Swift
+          git clone https://github.com/weichsel/ZIPFoundation.git
+          # Chuẩn bị file source của thư viện để gom vào biên dịch
+          cp -r ZIPFoundation/Sources/ZIPFoundation ReaderLock_Project/ReaderLock/
+
+      - name: Compile Swift App (Intel x86_64)
+        run: |
+          swiftc -target x86_64-apple-macosx12.0 -parse-as-library \
+                 $(find ReaderLock_Project/ReaderLock -name "*.swift") \
+                 -o MyApp_x86_64 \
+                 -framework SwiftUI -framework AppKit -framework Foundation -framework PDFKit -framework UniformTypeIdentifiers -framework Compression
+
+      - name: Compile Swift App (Apple Silicon ARM64)
+        run: |
+          swiftc -target arm64-apple-macosx12.0 -parse-as-library \
+                 $(find ReaderLock_Project/ReaderLock -name "*.swift") \
+                 -o MyApp_arm64 \
+                 -framework SwiftUI -framework AppKit -framework Foundation -framework PDFKit -framework UniformTypeIdentifiers -framework Compression
+
+      - name: Lipo Create Universal Binary
+        run: |
+          lipo -create -output MyApp.app/Contents/MacOS/MyApp MyApp_x86_64 MyApp_arm64
+
+      - name: Create Info.plist
+        run: |
+          cat <<EOF > MyApp.app/Contents/Info.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>MyApp</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.yourcompany.myapp</string>
+              <key>CFBundleExecutable</key>
+              <string>MyApp</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>12.0</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: CodeSign & Chmod X
+        run: |
+          chmod +x MyApp.app/Contents/MacOS/MyApp
+          # Sign adhoc cho phép file không bị macOS báo lỗi hư hỏng 
+          codesign --force --deep --sign - MyApp.app
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MyApp-Built
+          path: MyApp.app
