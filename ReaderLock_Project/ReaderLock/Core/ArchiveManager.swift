@@ -1,7 +1,7 @@
 import Foundation
 
 
-struct ArchivedPDF {
+struct ArchivedPDF: Hashable {
     let name: String
     let data: Data
 }
