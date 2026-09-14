@@ -4,24 +4,24 @@ struct MainView: View {
     @State private var pdfs: [ArchivedPDF] = []
     @State private var selectedPDF: ArchivedPDF?
     @State private var isBanned = false
+    @State private var banMessage = ""
     
     var body: some View {
         HStack(spacing: 0) {
-            // Sidebar Menu
             List(pdfs, id: \.name, selection: $selectedPDF) { pdf in
-                Text(pdf.name)
-                    .tag(pdf)
+                Text(pdf.name).tag(pdf)
             }
             .listStyle(SidebarListStyle())
-            .frame(width: 200)
+            .frame(width: 250)
             
-            // Content
             if isBanned {
                 VStack {
-                    Image(systemName: "xmark.octagon.fill")
+                    Image(systemName: "hand.raised.slash.fill")
                         .resizable().frame(width: 100, height: 100).foregroundColor(.red)
-                    Text("Thiết bị này đã bị Admin khóa quyền truy cập!")
+                    Text("BẢN QUYỀN ĐÃ BỊ THU HỒI")
                         .font(.title).padding()
+                    Text(banMessage)
+                        .foregroundColor(.gray)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -29,37 +29,36 @@ struct MainView: View {
                     ProtectedPDFViewer(pdfData: pdf.data)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    Text("Vui lòng chọn PDF ở menu bên trái")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Text("Vui lòng chọn bài giảng bên trái").frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
-        .onAppear {
-            loadBundleData()
-        }
+        .onAppear { loadBundleData() }
     }
     
     func loadBundleData() {
         guard let url = Bundle.main.url(forResource: "tailieu", withExtension: "khoa") else {
-            print("Không tìm thấy file tailieu.khoa")
             return
         }
-        
         do {
             let encryptedData = try Data(contentsOf: url)
             if let decryptedZip = CryptoManager.decryptPayload(data: encryptedData) {
                 let archiveData = ArchiveManager.extractInMemory(zipData: decryptedZip)
                 let myMid = MachineID.get()
                 
-                if archiveData.revocations.contains(myMid) {
-                    self.isBanned = true
-                } else {
-                    self.pdfs = archiveData.pdfs
-                    self.selectedPDF = archiveData.pdfs.first
+                let savedVersion = UserDefaults.standard.integer(forKey: "LicenseVersion")
+                if let bannedVersion = archiveData.revocations[myMid] {
+                    if savedVersion <= bannedVersion {
+                        UserDefaults.standard.removeObject(forKey: "LicenseKey")
+                        self.banMessage = "Mật khẩu cho thiết bị này đã bị xóa và thu hồi."
+                        self.isBanned = true
+                        return
+                    }
                 }
+                
+                self.pdfs = archiveData.pdfs.sorted(by: { $0.name < $1.name })
+                self.selectedPDF = self.pdfs.first
             }
-        } catch {
-            print("Lỗi đọc file bundle: \(error)")
-        }
+        } catch { }
     }
 }

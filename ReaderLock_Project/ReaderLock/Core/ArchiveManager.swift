@@ -1,16 +1,14 @@
 import Foundation
 
-
 struct ArchivedPDF: Hashable {
     let name: String
     let data: Data
 }
 
 struct ArchiveManager {
-    // Đọc hoàn toàn trên RAM
-    static func extractInMemory(zipData: Data) -> (pdfs: [ArchivedPDF], revocations: [String]) {
+    static func extractInMemory(zipData: Data) -> (pdfs: [ArchivedPDF], revocations: [String: Int]) {
         var pdfs: [ArchivedPDF] = []
-        var revocations: [String] = []
+        var revocations: [String: Int] = [:]
         
         guard let archive = try? Archive(data: zipData, accessMode: .read) else {
             return (pdfs, revocations)
@@ -24,14 +22,14 @@ struct ArchiveManager {
                 }
                 
                 if entry.path == "revocations.json" {
-                    if let revList = try? JSONDecoder().decode([String].self, from: entryData) {
-                        revocations = revList
+                    if let revDict = try? JSONDecoder().decode([String: Int].self, from: entryData) {
+                        revocations = revDict
                     }
                 } else if entry.path.hasSuffix(".pdf") {
                     pdfs.append(ArchivedPDF(name: entry.path, data: entryData))
                 }
             } catch {
-                print("Lỗi giải nén file in-memory: \(error)")
+                print("Lỗi giải nén: \(error)")
             }
         }
         

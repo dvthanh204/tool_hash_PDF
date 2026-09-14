@@ -3,6 +3,7 @@ import SwiftUI
 struct ActivationView: View {
     @Binding var isActivated: Bool
     @State private var licenseKey: String = ""
+    @State private var message: String = ""
     @State private var showError = false
     
     var body: some View {
@@ -13,34 +14,38 @@ struct ActivationView: View {
                 .frame(width: 80, height: 80)
                 .foregroundColor(.blue)
             
-            Text("Kích Hoạt Tài Liệu")
+            Text("TRÌNH MỞ BÀI GIẢNG PDF")
                 .font(.title)
                 .bold()
             
-            Text("Máy của bạn là: \(MachineID.get())")
+            Text("Thiết bị của bạn là: \(MachineID.get())")
                 .font(.headline)
                 .foregroundColor(.red)
-                .textSelection(.enabled) // Cho phép copy mã thiết bị gửi Admin
+                .textSelection(.enabled)
             
-            Text("Hãy nhập Key vào đây:")
-            TextField("License Key...", text: $licenseKey)
+            Text("Hãy nhập Mã kích hoạt vào đây:")
+            TextField("Nhập Key V1-PERM-XXX...", text: $licenseKey)
                 .textFieldStyle(RoundedBorderTextFieldStyle())
                 .frame(width: 400)
             
-            Button("KÍCH HOẠT") {
+            Button("🔒 MỞ BÀI GIẢNG") {
                 let trimmedKey = licenseKey.trimmingCharacters(in: .whitespacesAndNewlines)
-                if CryptoManager.verifyLicense(key: trimmedKey) {
+                let check = CryptoManager.verifyLicense(key: trimmedKey, machineID: MachineID.get())
+                
+                if check.isValid {
                     UserDefaults.standard.set(trimmedKey, forKey: "LicenseKey")
+                    UserDefaults.standard.set(check.version, forKey: "LicenseVersion")
                     isActivated = true
                 } else {
+                    message = check.message
                     showError = true
                 }
             }
             .buttonStyle(.borderedProminent)
-            .alert("Lỗi Kích Hoạt", isPresented: $showError) {
+            .alert("Lỗi Bản Quyền", isPresented: $showError) {
                 Button("OK", role: .cancel) { }
             } message: {
-                Text("License Key không đúng với máy này!")
+                Text(message)
             }
         }
         .frame(width: 600, height: 400)

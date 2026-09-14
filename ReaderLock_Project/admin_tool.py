@@ -1,220 +1,252 @@
-import customtkinter as ctk
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, messagebox
+import customtkinter as ctk
+import hashlib
+import base64
 import os
-import io
+import json
 import zipfile
 import shutil
-import base64
-import hmac
-import hashlib
+import datetime
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-# Static Key (32 bytes)
-SECRET_KEY = b'12345678901234567890123456789012'
+SECRET_SALT = "MY_SUPER_SECRET_2026"
+AES_KEY = hashlib.sha256(SECRET_SALT.encode()).digest()
 
-class AdminTool(ctk.CTk):
+def generate_key_for_client(machine_id, version=1, days=0):
+    if days <= 0:
+        expiry_str = "PERM"
+    else:
+        exp_date = datetime.datetime.now() + datetime.timedelta(days=days)
+        expiry_str = exp_date.strftime("%y%m%d")
+        
+    raw = f"{machine_id}_{version}_{expiry_str}_{SECRET_SALT}"
+    code_hash = hashlib.sha256(raw.encode()).hexdigest()[:8].upper()
+    return f"V{version}-{expiry_str}-{code_hash}"
+
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("blue")
+
+class AuthorApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("ReaderLock DRM Admin (macOS Target)")
+        self.title("ReaderLock Admin (macOS Target)")
         self.geometry("900x600")
-        ctk.set_appearance_mode("dark")
+        self.configure(fg_color="#0F172A")
+        self.load_revocations()
+
+        # Grid layout for Sidebar and Content
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
         
-        # Sidebar
-        self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
-        self.sidebar.pack(side="left", fill="y")
+        # --- SIDEBAR ---
+        self.sidebar_frame = ctk.CTkFrame(self, fg_color="#1E293B", width=220, corner_radius=0)
+        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
+        self.sidebar_frame.grid_rowconfigure(5, weight=1)
         
-        self.logo_label = ctk.CTkLabel(self.sidebar, text="Admin DRM", font=ctk.CTkFont(size=20, weight="bold"))
-        self.logo_label.pack(pady=20, padx=20)
+        ctk.CTkLabel(self.sidebar_frame, text="🛡 SLIDELOCK", font=ctk.CTkFont(family="Inter", size=22, weight="bold"), text_color="#38BDF8").pack(pady=(30, 5))
+        ctk.CTkLabel(self.sidebar_frame, text="macOS PDF DRM Panel", font=ctk.CTkFont(family="Inter", size=12), text_color="#94A3B8").pack(pady=(0, 30))
         
-        self.btn_pack = ctk.CTkButton(self.sidebar, text="Mã Hóa & Khởi Tạo App", command=lambda: self.show_frame("pack"))
-        self.btn_pack.pack(pady=10, padx=20)
-        self.btn_key = ctk.CTkButton(self.sidebar, text="Cấp Key Cứng", command=lambda: self.show_frame("key"))
-        self.btn_key.pack(pady=10, padx=20)
-        self.btn_revoke = ctk.CTkButton(self.sidebar, text="Khóa Máy (Revoke)", command=lambda: self.show_frame("revoke"), fg_color="#9e2a2b")
-        self.btn_revoke.pack(pady=10, padx=20)
-        self.btn_unrevoke = ctk.CTkButton(self.sidebar, text="Ân Xá Máy", command=lambda: self.show_frame("unrevoke"), fg_color="#5390d9")
-        self.btn_unrevoke.pack(pady=10, padx=20)
+        self.nav_btns = []
+        def nav_btn(text, cmd):
+            btn = ctk.CTkButton(self.sidebar_frame, text=text, font=ctk.CTkFont(family="Inter", size=14, weight="bold"), fg_color="transparent", text_color="#CBD5E1", hover_color="#334155", anchor="w", height=45, corner_radius=8, command=cmd)
+            btn.pack(pady=5, padx=20, fill="x")
+            self.nav_btns.append(btn)
+            return btn
+            
+        nav_btn("📦 1. Đóng Gói (Mã Hóa)", lambda: self.select_menu("tab1"))
+        nav_btn("🔑 2. Cấp Key Mới", lambda: self.select_menu("tab2"))
+        nav_btn("🔒 3. Danh Sách Đen", lambda: self.select_menu("tab3"))
+        nav_btn("🔓 4. Gỡ Lệnh Cấm", lambda: self.select_menu("tab4"))
         
-        # Main containers
-        self.main_container = ctk.CTkFrame(self)
-        self.main_container.pack(side="right", fill="both", expand=True, padx=20, pady=20)
+        # --- MAIN CONTENT ---
+        self.main_frame = ctk.CTkFrame(self, fg_color="#0F172A", corner_radius=0)
+        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=30, pady=30)
         
         self.frames = {}
-        self.setup_pack_frame()
-        self.setup_key_frame()
-        self.setup_revoke_frame()
-        self.setup_unrevoke_frame()
-        
-        self.show_frame("pack")
-        
-        # Data path
-        self.revocations_path = "revocations.json"
-        if not os.path.exists(self.revocations_path):
-            with open(self.revocations_path, "w") as f:
-                json.dump([], f)
+        for tab in ["tab1", "tab2", "tab3", "tab4"]:
+            self.frames[tab] = ctk.CTkFrame(self.main_frame, fg_color="transparent")
 
-    def show_frame(self, name):
-        for f in self.frames.values(): f.pack_forget()
-        self.frames[name].pack(fill="both", expand=True)
+        self.init_tab1()
+        self.init_tab2()
+        self.init_tab3()
+        self.init_tab4()
         
-    def setup_pack_frame(self):
-        frm = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        self.frames["pack"] = frm
-        
-        self.pdf_list = []
-        
-        ctk.CTkLabel(frm, text="Đóng gói App - Mã Hóa File (.khoa)", font=("Arial", 18, "bold")).pack(pady=10)
-        
-        self.lbl_files = ctk.CTkLabel(frm, text="Chưa chọn file PDF nào.")
-        self.lbl_files.pack(pady=10)
-        
-        ctk.CTkButton(frm, text="Duyệt File PDF", command=self.browse_pdfs).pack(pady=10)
-        
-        btn_start = ctk.CTkButton(frm, text="KHỞI TẠO APP ZIP", command=self.build_app, fg_color="#2b9348", height=50)
-        btn_start.pack(pady=30)
-        
-    def browse_pdfs(self):
-        files = filedialog.askopenfilenames(filetypes=[("PDF", "*.pdf")])
-        if files:
-            self.pdf_list = list(files)
-            self.lbl_files.configure(text=f"Đã chọn {len(self.pdf_list)} file PDF.")
+        self.select_menu("tab1")
+
+    def select_menu(self, menu_id):
+        for btn in self.nav_btns:
+            btn.configure(fg_color="transparent", text_color="#CBD5E1")
             
-    def build_app(self):
-        if not self.pdf_list:
+        idx = ["tab1", "tab2", "tab3", "tab4"].index(menu_id)
+        self.nav_btns[idx].configure(fg_color="#38BDF8", text_color="#0F172A")
+        
+        for f in self.frames.values():
+            f.pack_forget()
+        self.frames[menu_id].pack(fill="both", expand=True)
+
+    def load_revocations(self):
+        self.revocations = {}
+        if os.path.exists("revocations.json"):
+            try:
+                with open("revocations.json", "r") as f:
+                    self.revocations = json.load(f)
+            except: pass
+                
+    def save_revocations(self):
+        with open("revocations.json", "w") as f:
+            json.dump(self.revocations, f)
+
+    def build_card(self, parent, title, desc):
+        card = ctk.CTkFrame(parent, fg_color="#1E293B", corner_radius=16, border_width=1, border_color="#334155")
+        card.pack(fill="both", expand=True, pady=10)
+        ctk.CTkLabel(card, text=title, font=ctk.CTkFont(family="Inter", size=20, weight="bold"), text_color="#F8FAFC").pack(pady=(30, 5), anchor="w", padx=40)
+        ctk.CTkLabel(card, text=desc, font=ctk.CTkFont(family="Inter", size=13), text_color="#94A3B8").pack(pady=(0, 20), anchor="w", padx=40)
+        return card
+
+    # === TAB 1: MÃ HÓA ===
+    def init_tab1(self):
+        card = self.build_card(self.frames["tab1"], "Đóng Gói Bài Giảng (macOS Target)", "Mã hóa và nhúng DRM vào các file PDF (chạy cho Xcode App).")
+        self.filepath_var = tk.StringVar()
+        entry_file = ctk.CTkEntry(card, textvariable=self.filepath_var, height=45, placeholder_text="Chọn đường dẫn file .pdf...", font=ctk.CTkFont(family="Inter", size=13), fg_color="#0F172A", border_color="#475569")
+        entry_file.pack(padx=40, fill="x", pady=10)
+        
+        btn_browse = ctk.CTkButton(card, text="📂 Duyệt PDF", font=ctk.CTkFont(family="Inter", size=13, weight="bold"), command=self.browse_file, fg_color="#334155", hover_color="#475569", height=40)
+        btn_browse.pack(padx=40, anchor="e")
+
+        btn_build = ctk.CTkButton(card, text="🛡 KHỞI TẠO macOS APP", fg_color="#10B981", hover_color="#059669", font=ctk.CTkFont(family="Inter", size=15, weight="bold"), text_color="white", command=self.build_mac_app, height=50)
+        btn_build.pack(pady=40, padx=40, fill="x")
+        
+        self.status_lbl = ctk.CTkLabel(card, text="", text_color="#3B82F6", font=ctk.CTkFont(family="Inter", size=13))
+        self.status_lbl.pack()
+
+    def browse_file(self):
+        files = filedialog.askopenfilenames(filetypes=[("PDF", "*.pdf")])
+        if files: self.filepath_var.set(";".join(files))
+
+    def build_mac_app(self):
+        input_files = self.filepath_var.get().split(';')
+        if not input_files or not input_files[0] or not os.path.exists(input_files[0]):
             messagebox.showerror("Lỗi", "Hãy chọn ít nhất 1 file PDF!")
             return
-            
+
+        self.status_lbl.configure(text="Đang xử lý gói tin an mật Crypto...", text_color="#10B981")
+        self.update()
+        
         try:
-            # 1. Nén pdf và revocations.json vào BytesIO
+            # 1. Zip toàn bộ PDF và revocations.json vào RAM
+            import io
             mem_zip = io.BytesIO()
             with zipfile.ZipFile(mem_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
-                if os.path.exists(self.revocations_path):
-                    with open(self.revocations_path, "r") as f: data = f.read()
-                    zf.writestr("revocations.json", data)
-                else:
-                    zf.writestr("revocations.json", "[]")
-                    
-                for idx, pdf in enumerate(self.pdf_list):
-                    with open(pdf, "rb") as f:
-                        zf.writestr(f"tailieu_{idx+1}_{os.path.basename(pdf)}", f.read())
-            
+                zf.writestr("revocations.json", json.dumps(self.revocations))
+                for idx, pdf in enumerate(input_files):
+                    if os.path.exists(pdf):
+                        with open(pdf, "rb") as f:
+                            zf.writestr(f"tailieu_{idx+1}_{os.path.basename(pdf)}", f.read())
             zip_data = mem_zip.getvalue()
             
-            # 2. Mã hóa AES-GCM 256
-            aesgcm = AESGCM(SECRET_KEY)
+            # 2. Mã hóa bằng AES-GCM (Để macOS CryptoKit có thể đọc được)
+            aesgcm = AESGCM(AES_KEY)
             nonce = os.urandom(12)
             ciphertext = aesgcm.encrypt(nonce, zip_data, None)
             final_crypto_payload = nonce + ciphertext
             
-            # 3. Tạo file tailieu.khoa
-            with open("tailieu.khoa", "wb") as f: f.write(final_crypto_payload)
+            with open("tailieu.khoa", "wb") as f: 
+                f.write(final_crypto_payload)
             
-            # 4. Inject vào App
+            # 3. Gắn vào App macOS
             app_dir = "ReaderLock.app"
             if not os.path.exists(app_dir):
-                # Tạo giả lập nếu chưa có
-                os.makedirs(os.path.join(app_dir, "Contents", "Resources"), exist_ok=True)
-                os.makedirs(os.path.join(app_dir, "Contents", "MacOS"), exist_ok=True)
-                with open(os.path.join(app_dir, "Contents", "MacOS", "ReaderLock"), "w") as f: f.write("Dummy")
+                messagebox.showerror("Lỗi Cấu Trúc", "Không tìm thấy thư mục 'ReaderLock.app' được tải về từ bản build Github Actions.")
+                return
                 
             res_dir = os.path.join(app_dir, "Contents", "Resources")
             os.makedirs(res_dir, exist_ok=True)
             shutil.copy("tailieu.khoa", os.path.join(res_dir, "tailieu.khoa"))
+            os.remove("tailieu.khoa")
             
-            # 5. Build Final ZIP App
-            out_zip = "ReaderLock_Mac.zip"
+            # 4. Tạo file ZIP (XIP) trên thư mục dist để xuất hàng
+            os.makedirs("dist", exist_ok=True)
+            base_zip_name = 'macOS_KhoaHoc_MultiFiles.xip' if len(input_files) > 1 else f"macOS_KhoaHoc_{os.path.splitext(os.path.basename(input_files[0]))[0]}.xip"
+            out_zip = os.path.join("dist", base_zip_name)
+            
+            counter = 2
+            while os.path.exists(out_zip):
+                suffix = "MultiFiles" if len(input_files) > 1 else os.path.splitext(os.path.basename(input_files[0]))[0]
+                out_zip = os.path.join("dist", f"macOS_KhoaHoc_{suffix}{counter}.xip")
+                counter += 1
+
             with zipfile.ZipFile(out_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for root, dirs, files in os.walk(app_dir):
                     for file in files:
                         file_path = os.path.join(root, file)
                         arcname = os.path.relpath(file_path, ".")
                         zinfo = zipfile.ZipInfo.from_file(file_path, arcname)
-                        
                         if "Contents/MacOS/" in arcname.replace("\\", "/"):
-                            # 0x81ED = 0o100755
                             zinfo.external_attr = 0x81ED0000 | 0o755 << 16
                         else:
-                            # 0x81B4 = 0o100644
                             zinfo.external_attr = 0x81B40000 | 0o644 << 16
-                            
                         with open(file_path, "rb") as f:
                             zf.writestr(zinfo, f.read())
                             
-            messagebox.showinfo("Hoàn Thành", f"Tạo app thành công: {out_zip}\n(Đã cấp quyền thực thi cho file bên trong).")
+            self.status_lbl.configure(text="Mã hóa THÀNH CÔNG!")
+            messagebox.showinfo("Thành Công", f"Đã đóng gói xong xuôi qua:\n{out_zip}\n\n(Mang file .xip này gửi cho khách macOS)")
+
         except Exception as e:
-            messagebox.showerror("Lỗi Zip", str(e))
+            messagebox.showerror("Lỗi Build", f"Có lỗi xảy ra: {e}")
+            self.status_lbl.configure(text="Build thất bại!", text_color="#EF4444")
+
+    # === TAB 2: CẤP KEY ===
+    def init_tab2(self):
+        card = self.build_card(self.frames["tab2"], "Cấp Mật Khẩu macOS Mới", "Tạo mã truy cập an toàn cấp cho Học viên macOS.")
+        self.issue_mid_var = tk.StringVar()
+        ctk.CTkEntry(card, textvariable=self.issue_mid_var, height=45, placeholder_text="Nhập Machine ID (của khách macOS) vào đây...", font=ctk.CTkFont(family="Inter", size=14), fg_color="#0F172A", border_color="#475569").pack(pady=10, padx=40, fill="x")
+        self.issue_expiry_var = tk.StringVar(value="Vĩnh viễn")
+        ctk.CTkOptionMenu(card, variable=self.issue_expiry_var, values=["Vĩnh viễn", "7 Ngày", "30 Ngày", "365 Ngày"], font=ctk.CTkFont(family="Inter", size=13), height=40, fg_color="#334155", button_color="#475569").pack(pady=5, padx=40, anchor="w")
+        
+        ctk.CTkButton(card, text="🔑 TẠO MẬT KHẨU", font=ctk.CTkFont(family="Inter", size=14, weight="bold"), fg_color="#2563EB", hover_color="#1D4ED8", command=self.do_issue, height=45).pack(pady=25, padx=40, fill="x")
+        
+        self.issue_pwd_var = tk.StringVar()
+        ctk.CTkEntry(card, textvariable=self.issue_pwd_var, height=50, font=ctk.CTkFont(family="Consolas", size=16), justify='center', state='readonly', fg_color="#0F172A", text_color="#10B981", border_color="#10B981").pack(pady=10, padx=40, fill="x")
+
+    def do_issue(self):
+        mid = self.issue_mid_var.get().strip()
+        if not mid: return
+        days = {"7 Ngày": 7, "30 Ngày": 30, "365 Ngày": 365, "Vĩnh viễn": 0}.get(self.issue_expiry_var.get(), 0)
+        v = self.revocations.get(mid, 0) + 1
+        self.issue_pwd_var.set(generate_key_for_client(mid, version=v, days=days))
+
+    # === TAB 3: DANH SÁCH ĐEN ===
+    def init_tab3(self):
+        card = self.build_card(self.frames["tab3"], "Thu Hồi Từ Xa (Danh Sách Đen)", "Đưa một ID vào sổ đen để khóa cứng thiết bị ở các bản PDF sau.")
+        self.revoke_mid_var = tk.StringVar()
+        ctk.CTkEntry(card, textvariable=self.revoke_mid_var, height=45, placeholder_text="Nhập Machine ID cần CẤM...", font=ctk.CTkFont(family="Inter", size=14), fg_color="#0F172A", text_color="#EF4444", border_color="#475569").pack(pady=10, padx=40, fill="x")
+        
+        def run_revoke():
+            m = self.revoke_mid_var.get().strip()
+            if not m: return
+            self.revocations[m] = self.revocations.get(m, 0) + 1
+            self.save_revocations()
+            messagebox.showinfo("HOÀN TẤT", "Đã chặn. Khách này sẽ không thể dùng mật khẩu cũ để mở bản xuất App tiếp theo!")
             
-    def setup_key_frame(self):
-        frm = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        self.frames["key"] = frm
+        ctk.CTkButton(card, text="🔒 CHẶN MÁY NÀY", font=ctk.CTkFont(family="Inter", size=14, weight="bold"), fg_color="#EF4444", hover_color="#DC2626", text_color="white", command=run_revoke, height=45).pack(pady=25, padx=40, fill="x")
+
+    # === TAB 4: CẤP LẠI MÃ ===
+    def init_tab4(self):
+        card = self.build_card(self.frames["tab4"], "Gỡ Cấm & Cấp Lại Phục Hồi", "Cấp một mật khẩu version mới hoàn toàn để thả cửa cho máy.")
+        self.reissue_mid_var = tk.StringVar()
+        ctk.CTkEntry(card, textvariable=self.reissue_mid_var, height=45, placeholder_text="Nhập Machine ID cần Gỡ Băng...", font=ctk.CTkFont(family="Inter", size=14), fg_color="#0F172A", border_color="#475569").pack(pady=10, padx=40, fill="x")
+        self.reissue_pwd_var = tk.StringVar()
         
-        ctk.CTkLabel(frm, text="Cấp Key cho Machine ID", font=("Arial", 18, "bold")).pack(pady=10)
-        self.entry_mid = ctk.CTkEntry(frm, width=300, placeholder_text="Nhập IOPlatformSerialNumber (Machine ID)")
-        self.entry_mid.pack(pady=10)
-        
-        ctk.CTkButton(frm, text="Sinh License Key", command=self.gen_key).pack(pady=10)
-        
-        self.txt_key = ctk.CTkTextbox(frm, height=100, width=400)
-        self.txt_key.pack(pady=20)
-        
-    def gen_key(self):
-        mid = self.entry_mid.get().strip()
-        if not mid: return
-        h = hmac.new(SECRET_KEY, mid.encode('utf-8'), hashlib.sha256)
-        key_str = base64.b64encode(h.digest()).decode('utf-8')
-        self.txt_key.delete("0.0", "end")
-        self.txt_key.insert("0.0", key_str)
-        
-    def setup_revoke_frame(self):
-        frm = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        self.frames["revoke"] = frm
-        
-        ctk.CTkLabel(frm, text="Khóa Máy (Ghi đè vào revocations.json)", font=("Arial", 18, "bold"), text_color="#d00000").pack(pady=10)
-        self.entry_rev = ctk.CTkEntry(frm, width=300, placeholder_text="Machine ID cần khóa")
-        self.entry_rev.pack(pady=10)
-        
-        ctk.CTkButton(frm, text="Khóa Thiết Bị", command=self.revoke_mid, fg_color="#d00000").pack(pady=10)
-        
-    def revoke_mid(self):
-        mid = self.entry_rev.get().strip()
-        if not mid: return
-        with open(self.revocations_path, "r") as f:
-            data = json.load(f)
-        if mid not in data:
-            data.append(mid)
-            with open(self.revocations_path, "w") as f:
-                json.dump(data, f)
-            messagebox.showinfo("OK", f"Đã khóa máy: {mid}")
-        else:
-            messagebox.showinfo("Lỗi", "Máy này đã bị khóa từ trước!")
+        def run_unrevoke():
+            m = self.reissue_mid_var.get().strip()
+            if not m: return
+            new_v = self.revocations.get(m, 0) + 1
+            self.reissue_pwd_var.set(generate_key_for_client(m, version=new_v, days=0))
             
-    def setup_unrevoke_frame(self):
-        frm = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        self.frames["unrevoke"] = frm
-        
-        ctk.CTkLabel(frm, text="Ân Xá (Xóa khỏi Blacklist)", font=("Arial", 18, "bold")).pack(pady=10)
-        self.entry_unv = ctk.CTkEntry(frm, width=300, placeholder_text="Machine ID muốn ân xá")
-        self.entry_unv.pack(pady=10)
-        
-        ctk.CTkButton(frm, text="Ân Xá", command=self.unrevoke_mid, fg_color="#5390d9").pack(pady=10)
-        
-    def unrevoke_mid(self):
-        mid = self.entry_unv.get().strip()
-        if not mid: return
-        with open(self.revocations_path, "r") as f:
-            data = json.load(f)
-        if mid in data:
-            data.remove(mid)
-            with open(self.revocations_path, "w") as f:
-                json.dump(data, f)
-                
-            h = hmac.new(SECRET_KEY, mid.encode('utf-8'), hashlib.sha256)
-            key_str = base64.b64encode(h.digest()).decode('utf-8')
-            messagebox.showinfo("Đã Ân Xá", f"Thiết bị đã được thả.\nLicense Key của họ là:\n{key_str}")
-        else:
-            messagebox.showinfo("Lỗi", "Không tìm thấy trong danh sách chặn!")
+        ctk.CTkButton(card, text="🔓 GỠ KHÓA & SINH MÃ MỚI", font=ctk.CTkFont(family="Inter", size=14, weight="bold"), fg_color="#F59E0B", hover_color="#D97706", text_color="white", command=run_unrevoke, height=45).pack(pady=25, padx=40, fill="x")
+        ctk.CTkEntry(card, textvariable=self.reissue_pwd_var, height=50, font=ctk.CTkFont(family="Consolas", size=16), justify='center', state='readonly', fg_color="#0F172A", text_color="#F59E0B", border_color="#F59E0B").pack(pady=10, padx=40, fill="x")
 
 if __name__ == "__main__":
-    app = AdminTool()
+    app = AuthorApp()
     app.mainloop()
